@@ -267,6 +267,12 @@ tr:last-child td{border-bottom:none}
   @keyframes slideUp{from{opacity:0;transform:translateY(-10px) scale(.97)}to{opacity:1;transform:none}}
 }
 </style>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f1e3d">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ISG Takip">
 </head>
 <body>
 
@@ -340,9 +346,19 @@ async function loadData(){
   try{
     const r=await window.storage.get('isg_mob_firms');
     if(r)S.firms=JSON.parse(r.value);
-    else S.firms=JSON.parse(JSON.stringify(sampleData()));
-  }catch(e){S.firms=JSON.parse(JSON.stringify(sampleData()))}
-  try{const r=await window.storage.get('isg_mob_ui');if(r){const u=JSON.parse(r.value);S.selId=u.selId;S.tab=u.tab||'firma';S.openCat=u.openCat||S.openCat}}catch(e){}
+    else{
+      // window.storage yoksa localStorage yedekten dene
+      const bak=localStorage.getItem('isg_mob_firms_bak');
+      if(bak){S.firms=JSON.parse(bak);console.log('localStorage yedekten yuklendi');}
+      else S.firms=JSON.parse(JSON.stringify(sampleData()));
+    }
+  }catch(e){
+    try{const bak=localStorage.getItem('isg_mob_firms_bak');if(bak)S.firms=JSON.parse(bak);else S.firms=JSON.parse(JSON.stringify(sampleData()))}
+    catch(e2){S.firms=JSON.parse(JSON.stringify(sampleData()))}
+  }
+  try{const r=await window.storage.get('isg_mob_ui');if(r){const u=JSON.parse(r.value);S.selId=u.selId;S.tab=u.tab||'firma';S.openCat=u.openCat||S.openCat}}catch(e){
+    try{const bak=localStorage.getItem('isg_mob_ui_bak');if(bak){const u=JSON.parse(bak);S.selId=u.selId;S.tab=u.tab||'firma';S.openCat=u.openCat||S.openCat}}catch(e2){}
+  }
   initFirms();
   renderList();
   if(S.selId&&S.firms.find(f=>f.id===S.selId)){showFirm(S.selId,false)}
@@ -350,7 +366,11 @@ async function loadData(){
 function scheduleSave(){
   if(saveTimer)clearTimeout(saveTimer);
   saveTimer=setTimeout(async()=>{
-    try{await window.storage.set('isg_mob_firms',JSON.stringify(S.firms));await window.storage.set('isg_mob_ui',JSON.stringify({selId:S.selId,tab:S.tab,openCat:S.openCat}))}catch(e){}
+    const data=JSON.stringify(S.firms);
+    const ui=JSON.stringify({selId:S.selId,tab:S.tab,openCat:S.openCat});
+    // localStorage yedek olarak da kaydet
+    try{localStorage.setItem('isg_mob_firms_bak',data);localStorage.setItem('isg_mob_ui_bak',ui)}catch(e){}
+    try{await window.storage.set('isg_mob_firms',data);await window.storage.set('isg_mob_ui',ui)}catch(e){}
   },600);
 }
 
@@ -916,15 +936,27 @@ function buildMO(){
 
   if(m.t==='aeq'||m.t==='eeq'){
     const e=m.t==='eeq'?f.ekipmanlar.find(x=>x.id===m.eid):{ad:'',tur:EQT[0],sonK:'',periyot:'1 Yıl',kontFirma:'',kontKisi:'',kontTel:'',kontEmail:'',notlar:''};
-    return W(m.t==='eeq'?'Ekipman Düzenle':'Ekipman Ekle',`
-      <div class="fg"><label class="fl">Ekipman Adı *</label><input id="en" value="${e.ad||''}" autocapitalize="words"></div>
-      <div class="fg"><label class="fl">Ekipman Türü *</label><select id="et">${EQT.map(t=>`<option${t===e.tur?' selected':''}>${t}</option>`).join('')}</select></div>
+    const kontFirmalar=[];
+    S.firms.forEach(fi=>fi.ekipmanlar.forEach(ek=>{
+      if(ek.kontFirma&&!kontFirmalar.find(k=>k.ad===ek.kontFirma)){
+        kontFirmalar.push({ad:ek.kontFirma,kisi:ek.kontKisi||'',tel:ek.kontTel||'',email:ek.kontEmail||''});
+      }
+    }));
+    const kfOpts=kontFirmalar.length?`<div class="fg"><label class="fl" style="color:var(--bl);font-weight:600">Kayitli Firmadan Sec</label>
+      <select id="ekf-sec">
+        <option value="">— Manuel gir —</option>
+        ${kontFirmalar.map(k=>`<option value="${k.ad}" data-kisi="${k.kisi}" data-tel="${k.tel}" data-email="${k.email}">${k.ad}</option>`).join('')}
+      </select></div>`:'';
+    return W(m.t==='eeq'?'Ekipman Duzenle':'Ekipman Ekle',`
+      <div class="fg"><label class="fl">Ekipman Adi *</label><input id="en" value="${e.ad||''}" autocapitalize="words"></div>
+      <div class="fg"><label class="fl">Ekipman Turu *</label><select id="et">${EQT.map(t=>`<option${t===e.tur?' selected':''}>${t}</option>`).join('')}</select></div>
       <div class="fr2">
         <div class="fg"><label class="fl">Periyot *</label><select id="ep">${EQP.map(p=>`<option${p===e.periyot?' selected':''}>${p}</option>`).join('')}</select></div>
         <div class="fg"><label class="fl">Son Kontrol</label><input id="esk" type="date" value="${e.sonK||''}"></div>
       </div>
-      <div style="font-size:13px;font-weight:700;color:var(--navy);margin:10px 0 7px;padding-top:10px;border-top:1.5px solid var(--bdr)">Kontrol Firması</div>
-      <div class="fg"><label class="fl">Firma Adı</label><input id="ekf" value="${e.kontFirma||''}" autocapitalize="words"></div>
+      <div style="font-size:13px;font-weight:700;color:var(--navy);margin:10px 0 7px;padding-top:10px;border-top:1.5px solid var(--bdr)">Kontrol Firmasi</div>
+      ${kfOpts}
+      <div class="fg"><label class="fl">Firma Adi</label><input id="ekf" value="${e.kontFirma||''}" autocapitalize="words" placeholder="Kontrol firmasi"></div>
       <div class="fr2">
         <div class="fg"><label class="fl">Yetkili</label><input id="ekk" value="${e.kontKisi||''}" autocapitalize="words"></div>
         <div class="fg"><label class="fl">Telefon</label><input id="ekt" type="tel" value="${e.kontTel||''}" inputmode="tel"></div>
@@ -1010,6 +1042,16 @@ function attachModalEvents(){
   q('ms-ae')?.addEventListener('click',()=>saveE('Manuel'));
   q('ms-ae-ocr')?.addEventListener('click',()=>saveE('Tarama'));
   q('ms-aeq')?.addEventListener('click',()=>{const n=q('en')?.value.trim();if(!n)return;f.ekipmanlar.push({id:nId(f.ekipmanlar),ad:n,tur:q('et')?.value,sonK:q('esk')?.value||'',periyot:q('ep')?.value,kontFirma:q('ekf')?.value||'',kontKisi:q('ekk')?.value||'',kontTel:q('ekt')?.value||'',kontEmail:q('eke')?.value||'',notlar:''});S.modal=null;renderModal();renderFirmScreen();scheduleSave()});
+  // Kontrol firması listeden seçince alanları otomatik doldur
+  q('ekf-sec')?.addEventListener('change',e=>{
+    const sel=e.target.options[e.target.selectedIndex];
+    if(!sel.value)return;
+    const qf=id=>document.getElementById(id);
+    if(qf('ekf'))qf('ekf').value=sel.value;
+    if(qf('ekk'))qf('ekk').value=sel.dataset.kisi||'';
+    if(qf('ekt'))qf('ekt').value=sel.dataset.tel||'';
+    if(qf('eke'))qf('eke').value=sel.dataset.email||'';
+  });
   q('ms-eeq')?.addEventListener('click',()=>{const e=f.ekipmanlar.find(x=>x.id===S.modal.eid),n=q('en')?.value.trim();if(!e||!n)return;e.ad=n;e.tur=q('et')?.value;e.sonK=q('esk')?.value||e.sonK;e.periyot=q('ep')?.value;e.kontFirma=q('ekf')?.value||'';e.kontKisi=q('ekk')?.value||'';e.kontTel=q('ekt')?.value||'';e.kontEmail=q('eke')?.value||'';S.modal=null;renderModal();renderFirmScreen();scheduleSave()});
   q('ms-pe')?.addEventListener('click',()=>{if(!f.yillikPlan)f.yillikPlan={};document.querySelectorAll('.plsel').forEach(el=>{const t=el.dataset.t,v=el.value;if(v!=='')f.yillikPlan[t]=parseInt(v);else delete f.yillikPlan[t]});S.modal=null;renderModal();renderFirmScreen();scheduleSave();notify('Plan güncellendi')});
 }
